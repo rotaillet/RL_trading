@@ -1,0 +1,14 @@
+    # Finance
+    "JPM", "BAC", "C", "GS", "MS",
+    # Santé
+    "JNJ", "PFE", "MRK", "UNH", "ABBV",
+    # Énergie
+    "XOM", "CVX", "COP", "SLB", "EOG",
+    # Industrie
+    "BA", "CAT", "DE", "LMT", "HON",
+    # Conso discrétionnaire
+    "TSLA", "HD", "MCD", "NKE", "SBUX",
+    # Conso de base
+    "PG", "KO", "PEP", "WMT", "COST",
+    # Télécom / médias
+    "VZ", "T", "DIS", "NFLX", "CMCSA",
