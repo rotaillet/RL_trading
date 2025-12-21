@@ -66,13 +66,13 @@ def drawdown_series(values):
     peak = np.maximum.accumulate(v)
     return (v - peak) / (peak + 1e-12)
 
-def annualized_return(values, periods_per_year: int = 252):
-    """
-    Rendement annualisé (CAGR) d'une courbe de valeur (start -> end).
-    """
-    v = _to_numpy(values)
-    v = v[np.isfinite(v)]
-    if v.size < 2 or v[0] <= 0 or v[-1] <= 0:
-        return 0.0
-    n = v.size
-    return (v[-1] / v[0]) ** (periods_per_year / n) - 1.0
+def annualized_return(curve):
+    curve = np.asarray(curve, dtype=float)
+    curve = curve[np.isfinite(curve)]
+    if len(curve) < 2:
+        return np.nan
+    total_return = curve[-1] / curve[0]
+    total_return = np.clip(total_return, 1e-12, 1e12)
+    n_years = len(curve) / 252
+    return total_return ** (1 / n_years) - 1
+

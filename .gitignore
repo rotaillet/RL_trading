@@ -1,0 +1,15 @@
+# Environnement virtuel
+venv310/
+
+# Cache Python
+**/__pycache__/
+*.pyc
+
+# Données et modèles (souvent trop lourds pour Git)
+checkpoints/
+best_model*/
+logs/
+experiments/
+
+# Fichiers de données volumineux (optionnel, selon votre besoin)
+data/processed/*.csv

@@ -26,15 +26,17 @@ class PortfolioEnv(gym.Env):
 
     metadata = {"render.modes": ["human"]}
 
-    def __init__(self, features: np.ndarray, window: int = 20, tx_cost: float = 0.001):
+    def __init__(self, features: np.ndarray,features_macro: np.ndarray, window: int = 20, tx_cost: float = 0.003):
         super().__init__()
         self.features = features.astype(np.float32)   # (T, N, F) avec features[:, :, 0] = log-returns
-        self.T, self.N, self.F = features.shape
+        self.features_macro = features_macro.astype(np.float32)
+        self.T,self.N, self.F = features.shape
+        self.T2, self.F2 = features_macro.shape
         self.window = window
         self.tx_cost = tx_cost
 
         # Coefficients (valeurs par défaut raisonnables)
-        self.lambda_turn = 0.001     # pénalisation du turnover (L1 brut)
+        self.lambda_turn = 0.01     # pénalisation du turnover (L1 brut)
         self.lambda_sharpe = 0.003   # poids du rolling Sharpe si activé
         self.lambda_cagr = 0.25      # bonus terminal CAGR si activé
         self.lambda_dd = 0.5         # pénalité terminale max drawdown si activé
@@ -42,7 +44,7 @@ class PortfolioEnv(gym.Env):
 
         # Options de comportement
         self.turnover_on_assets_only = True   # True: on ne pénalise pas le cash dans le L1
-        self.half_turnover_cost = True        # True: coût = tx_cost * (0.5 * L1), sinon tx_cost * L1
+        self.half_turnover_cost = False        # True: coût = tx_cost * (0.5 * L1), sinon tx_cost * L1
         self.enable_rolling_sharpe = False    # False par défaut (à activer après stabilisation)
         self.enable_terminal_bonuses = False  # False par défaut (à activer après stabilisation)
 
@@ -50,6 +52,8 @@ class PortfolioEnv(gym.Env):
         self.observation_space = spaces.Dict({
             "market": spaces.Box(low=-np.inf, high=np.inf,
                                  shape=(self.window, self.N, self.F), dtype=np.float32),
+            "macro": spaces.Box(low=-np.inf, high=np.inf,
+                                 shape=(self.window, self.F2), dtype=np.float32),
             "alloc_prev": spaces.Box(low=0.0, high=1.0,
                                      shape=(self.N + 1,), dtype=np.float32)
         })
@@ -72,8 +76,10 @@ class PortfolioEnv(gym.Env):
 
     def _get_obs(self):
         market_obs = self.features[self.t - self.window:self.t]  # (window, N, F)
+        macro_obs = self.features_macro[self.t - self.window:self.t]
         return {
             "market": market_obs,
+            "macro": macro_obs,
             "alloc_prev": self.weights.astype(np.float32)
         }
 
@@ -147,6 +153,7 @@ class PortfolioEnv(gym.Env):
         else:
             obs = {
                 "market": np.zeros((self.window, self.N, self.F), dtype=np.float32),
+                "macro": np.zeros((self.window, self.F2), dtype=np.float32),
                 "alloc_prev": np.zeros(self.N + 1, dtype=np.float32),
             }
 
@@ -156,6 +163,7 @@ class PortfolioEnv(gym.Env):
             "turnover": float(l1),                 # L1 brut (monitoring)
             "tx_cost_effective": float(effective_turnover),  # 0.5*L1 si option activée
             "max_drawdown": float(self.max_drawdown),
+            "weights": a.copy(),                   # <--- AJOUT
         }
         return obs, float(reward), done, info
 

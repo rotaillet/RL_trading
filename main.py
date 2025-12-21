@@ -1,5 +1,19 @@
 import argparse
 from src.train.train import run_train
+import torch
+import numpy as np
+import random
+
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+    # Pour reproductibilité stricte
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -9,5 +23,6 @@ if __name__ == "__main__":
     parser.add_argument("--n_envs", type=int, default=4)
     parser.add_argument("--out", type=str, default="experiments/ppo_gru")
     args = parser.parse_args()
-
-    run_train(csv_returns_path=args.returns, total_timesteps=args.timesteps, window=args.window, n_envs=args.n_envs, out_path=args.out)
+    for i in range(5):
+        set_seed(i)
+        run_train(csv_returns_path=args.returns, total_timesteps=args.timesteps, window=args.window, n_envs=args.n_envs, out_path=args.out,i=i)

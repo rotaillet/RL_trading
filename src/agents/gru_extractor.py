@@ -5,56 +5,93 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 class GRUFeatureExtractor(BaseFeaturesExtractor):
     """
-    Extracteur de features basé sur un GRU avec régularisation.
-    - Dropout pour éviter le surapprentissage
-    - LayerNorm pour stabiliser les activations
-    Compatible avec (batch, window, n_assets, n_features)
+    Extracteur GRU bi-branche :
+      - GRU marché (multi-actifs)
+      - GRU macro (facteurs globaux)
+      - MLP sur allocation précédente
+      - Fusion finale stabilisée
+    Compatible avec :
+        market: (B, W, N, F)
+        macro:  (B, W, F_macro)
+        alloc_prev: (B, N+1)
     """
-    def __init__(self, observation_space: spaces.Dict, features_dim: int = 128, hidden_size: int = 64, dropout: float = 0.4):
-        super(GRUFeatureExtractor, self).__init__(observation_space, features_dim)
-        
-        # Dimensions observation
-        self.window, self.n_assets, self.n_feat = observation_space.spaces["market"].shape
-        self.input_dim = self.n_assets * self.n_feat
+    def __init__(self, observation_space: spaces.Dict,
+                 features_dim: int = 256,
+                 hidden_size: int = 128,
+                 macro_hidden: int = 64,
+                 dropout: float = 0.2):
+        super().__init__(observation_space, features_dim)
+
+        # --- Dimensions extraites des spaces
+        self.window = observation_space.spaces["market"].shape[0]
+        self.n_assets = observation_space.spaces["market"].shape[1]
+        self.n_feat = observation_space.spaces["market"].shape[2]
+        self.f_macro = observation_space.spaces["macro"].shape[1]
         self.alloc_dim = observation_space.spaces["alloc_prev"].shape[0]
+        # === Dimensions projetées équilibrées
+        self.market_dim = features_dim // 3
+        self.macro_dim = features_dim // 3
+        # Ajustement automatique pour que la somme tombe juste
+        self.alloc_proj_dim = features_dim - (self.market_dim + self.macro_dim)
 
-        # GRU
-        self.gru = nn.GRU(self.input_dim, hidden_size, batch_first=True)
-        self.norm_gru = nn.LayerNorm(hidden_size)
+        # === GRU marché
+        self.gru_market = nn.GRU(self.n_assets * self.n_feat, hidden_size, batch_first=True)
+        self.norm_market = nn.LayerNorm(hidden_size)
 
-        # Couches denses avec dropout
+        # === GRU macro
+        self.gru_macro = nn.GRU(self.f_macro, macro_hidden, batch_first=True)
+        self.norm_macro = nn.LayerNorm(macro_hidden)
+
+        # === MLPs individuels
         self.fc_market = nn.Sequential(
-            nn.Linear(hidden_size, features_dim // 2),
+            nn.Linear(hidden_size, self.market_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout)
+        )
+
+        self.fc_macro = nn.Sequential(
+            nn.Linear(macro_hidden, self.macro_dim),
             nn.ReLU(),
             nn.Dropout(dropout)
         )
 
         self.fc_alloc = nn.Sequential(
-            nn.Linear(self.alloc_dim, features_dim // 2),
+            nn.Linear(self.alloc_dim, self.alloc_proj_dim),
             nn.ReLU(),
             nn.Dropout(dropout)
         )
 
-        # Fusion finale
+
+        # === Fusion finale
+        concat_dim = self.market_dim + self.macro_dim + self.alloc_proj_dim
+
         self.fc_out = nn.Sequential(
-            nn.Linear(features_dim, features_dim),
+            nn.Linear(concat_dim, features_dim),
             nn.ReLU(),
-            nn.LayerNorm(features_dim)  # stabilisation finale
+            nn.LayerNorm(features_dim),
+            nn.Dropout(dropout)
         )
 
-    def forward(self, observations):
-        market = observations["market"]   # (batch, window, n_assets, n_feat)
+    def forward(self, obs):
+        # --- Market sequence
+        market = obs["market"]  # (B, W, N, F)
         b, w, n, f = market.shape
-        market = market.view(b, w, n*f)   # aplatis N*F → GRU input
+        market = market.view(b, w, n * f)
+        _, h_market = self.gru_market(market)
+        h_market = self.norm_market(h_market.squeeze(0))
+        feat_market = self.fc_market(h_market)
 
-        alloc_prev = observations["alloc_prev"]  # (batch, N+1)
+        # --- Macro sequence
+        macro = obs["macro"]  # (B, W, F_macro)
+        _, h_macro = self.gru_macro(macro)
+        h_macro = self.norm_macro(h_macro.squeeze(0))
+        feat_macro = self.fc_macro(h_macro)
 
-        # GRU encode la séquence
-        _, h = self.gru(market)  # h: (1, batch, hidden_size)
-        h = self.norm_gru(h.squeeze(0))  # (batch, hidden_size)
+        # --- Previous allocation
+        alloc_prev = obs["alloc_prev"]  # (B, N+1)
+        feat_alloc = self.fc_alloc(alloc_prev)
 
-        market_feat = self.fc_market(h)
-        alloc_feat = self.fc_alloc(alloc_prev)
-
-        x = th.cat([market_feat, alloc_feat], dim=-1)
-        return self.fc_out(x)
+        # --- Fusion des 3 branches
+        fused = th.cat([feat_market, feat_macro, feat_alloc], dim=-1)
+        out = self.fc_out(fused)
+        return out
